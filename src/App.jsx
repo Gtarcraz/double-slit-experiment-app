@@ -66,22 +66,25 @@ function fraunhoferDistance(numSlits, spacing, wavelength) {
 
 function getAutoViewScale(numSlits, spacing) {
   /*
-    Auto zoom-out rule:
-    More slits or larger slit spacing means a larger aperture D.
-    The pixels-per-unit scale is reduced so the entire aperture remains visible.
+    Base fit scale. This is only the starting point.
+    The user-controlled view zoom multiplies this value.
   */
   const D = apertureSize(numSlits, spacing);
-  const targetAperturePixels = 410;
-  const maxScale = 88;
-  const minScale = 30;
+  const targetAperturePixels = 390;
+  const maxScale = 82;
+  const minScale = 26;
 
-  if (D < 0.01) return 78;
+  if (D < 0.01) return 74;
   return clamp(targetAperturePixels / D, minScale, maxScale);
 }
 
-function getSlitHalfHeight(numSlits, spacing) {
-  if (numSlits <= 1) return 18;
-  return clamp(0.13 * getAutoViewScale(numSlits, spacing) * spacing, 5, 15);
+function getViewScale(params) {
+  return getAutoViewScale(params.numSlits, params.spacing) * params.viewZoom;
+}
+
+function getSlitHalfHeight(params) {
+  if (params.numSlits <= 1) return 18;
+  return clamp(0.13 * getViewScale(params) * params.spacing, 4, 15);
 }
 
 function computeFarFieldPattern({ numSlits, spacing, wavelength, angleMaxDeg }) {
@@ -198,51 +201,52 @@ function FarFieldIntensityPlot({ params }) {
 
   This is much closer to the reference picture than drawing separate circles.
 */
+
 function ColorScalarFieldSVG({ params, tick, showContours }) {
   const width = 1000;
   const height = 610;
   const slitX = 125;
+  const screenX = 885;
   const centerY = height / 2;
-  const pxPerUnit = getAutoViewScale(params.numSlits, params.spacing);
+  const pxPerUnit = getViewScale(params);
   const slits = slitPositions(params.numSlits, params.spacing);
   const slitYs = slits.map((s) => centerY + s * pxPerUnit);
   const k = TWO_PI / params.wavelength;
   const omegaT = tick * 0.115 * params.animationSpeed;
 
-  const cols = 175;
-  const rows = 110;
-  const dx = width / cols;
+  const cols = 160;
+  const rows = 108;
+  const dx = screenX / cols;
   const dy = height / rows;
   const cells = [];
 
   let maxA = 1e-9;
   const raw = [];
 
+  function fieldAtPixel(px, py) {
+    if (px < slitX - 4) {
+      const xModel = (px - slitX) / pxPerUnit;
+      return Math.cos(k * xModel - omegaT);
+    }
+
+    const xModel = Math.max(0.04, (px - slitX) / pxPerUnit);
+    const yModel = (py - centerY) / pxPerUnit;
+    let e = 0;
+
+    for (const ys of slits) {
+      const r = Math.sqrt(xModel * xModel + (yModel - ys) * (yModel - ys));
+      const amp = 1 / Math.sqrt(Math.max(r, 0.08));
+      e += amp * Math.cos(k * r - omegaT);
+    }
+
+    return e / Math.sqrt(params.numSlits);
+  }
+
   for (let ix = 0; ix < cols; ix++) {
     for (let iy = 0; iy < rows; iy++) {
       const px = ix * dx + dx * 0.5;
       const py = iy * dy + dy * 0.5;
-
-      let e = 0;
-
-      if (px < slitX - 4) {
-        // plane wave on the incident side
-        const xModel = (px - slitX) / pxPerUnit;
-        e = Math.cos(k * xModel - omegaT);
-      } else {
-        const xModel = Math.max(0.04, (px - slitX) / pxPerUnit);
-        const yModel = (py - centerY) / pxPerUnit;
-
-        for (const ys of slits) {
-          const r = Math.sqrt(xModel * xModel + (yModel - ys) * (yModel - ys));
-          const amp = 1 / Math.sqrt(Math.max(r, 0.08));
-          e += amp * Math.cos(k * r - omegaT);
-        }
-
-        // mild normalization so 1 slit and many slits both look good
-        e /= Math.sqrt(params.numSlits);
-      }
-
+      const e = fieldAtPixel(px, py);
       maxA = Math.max(maxA, Math.abs(e));
       raw.push({ ix, iy, e });
     }
@@ -253,15 +257,27 @@ function ColorScalarFieldSVG({ params, tick, showContours }) {
     cells.push({
       x: p.ix * dx,
       y: p.iy * dy,
-      w: dx + 0.3,
-      h: dy + 0.3,
+      w: dx + 0.4,
+      h: dy + 0.4,
       color: colorMapTurboLike(norm),
     });
   }
 
+  const screenSamples = [];
+  const sampleCount = 180;
+  let maxScreenAbs = 1e-9;
+  const screenSampleX = screenX - 18;
+
+  for (let i = 0; i < sampleCount; i++) {
+    const y = 22 + (i / (sampleCount - 1)) * (height - 44);
+    const e = fieldAtPixel(screenSampleX, y);
+    maxScreenAbs = Math.max(maxScreenAbs, Math.abs(e));
+    screenSamples.push({ y, e });
+  }
+
   const barrierSegments = [];
   let last = 0;
-  const slitHalfHeight = getSlitHalfHeight(params.numSlits, params.spacing);
+  const slitHalfHeight = getSlitHalfHeight(params);
   const sortedYs = [...slitYs].sort((a, b) => a - b);
   for (const y of sortedYs) {
     barrierSegments.push({ y1: last, y2: Math.max(last, y - slitHalfHeight) });
@@ -281,7 +297,7 @@ function ColorScalarFieldSVG({ params, tick, showContours }) {
   }
 
   return (
-    <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Colored total scalar field">
+    <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Colored total scalar field with real-field histogram">
       <rect width={width} height={height} fill="#020617" />
 
       {cells.map((c, idx) => (
@@ -305,7 +321,7 @@ function ColorScalarFieldSVG({ params, tick, showContours }) {
         </g>
       )}
 
-      {/* Aperture screen */}
+      {/* aperture screen */}
       {barrierSegments.map((seg, idx) => (
         <rect
           key={`barrier-${idx}`}
@@ -332,18 +348,48 @@ function ColorScalarFieldSVG({ params, tick, showContours }) {
           <line x1={slitX - 26} y1={Math.min(...slitYs)} x2={slitX - 26} y2={Math.max(...slitYs)} stroke="#111827" strokeWidth="2" opacity="0.55" />
           <line x1={slitX - 34} y1={Math.min(...slitYs)} x2={slitX - 18} y2={Math.min(...slitYs)} stroke="#111827" strokeWidth="2" opacity="0.55" />
           <line x1={slitX - 34} y1={Math.max(...slitYs)} x2={slitX - 18} y2={Math.max(...slitYs)} stroke="#111827" strokeWidth="2" opacity="0.55" />
-          <text x={slitX - 90} y={centerY + 5} fill="#111827" fontWeight="900" fontSize="13">
-            aperture D
-          </text>
+          <text x={slitX - 90} y={centerY + 5} fill="#111827" fontWeight="900" fontSize="13">aperture D</text>
         </g>
       )}
+
+      {/* right-edge real field histogram / trace */}
+      <g>
+        <rect x={screenX} y="0" width={width - screenX} height={height} fill="rgba(2,6,23,0.72)" />
+        <line x1={screenX} y1="0" x2={screenX} y2={height} stroke="#ffffff" strokeWidth="3" strokeDasharray="8 8" />
+        <text x={screenX + 12} y="30" fill="#ffffff" fontSize="15" fontWeight="900">right-edge Re&#123;E&#125;</text>
+        <text x={screenX + 12} y="51" fill="#cbd5e1" fontSize="12">horizontal bars show signed real field</text>
+
+        {screenSamples.map((s, idx) => {
+          const normalized = s.e / maxScreenAbs;
+          const bar = normalized * 46;
+          const x0 = screenX + 58;
+          const color = normalized >= 0 ? "#22d3ee" : "#fb7185";
+          return (
+            <line
+              key={`sample-${idx}`}
+              x1={x0}
+              y1={s.y}
+              x2={x0 + bar}
+              y2={s.y}
+              stroke={color}
+              strokeWidth="2.1"
+              opacity="0.85"
+            />
+          );
+        })}
+
+        <line x1={screenX + 58} y1="74" x2={screenX + 58} y2={height - 22} stroke="#e2e8f0" strokeWidth="1.3" opacity="0.9" />
+        <text x={screenX + 14} y={height - 20} fill="#e2e8f0" fontSize="12">
+          This is amplitude, not intensity.
+        </text>
+      </g>
 
       <text x="28" y="36" fill="#111827" fontWeight="950" fontSize="18">incident plane wave</text>
       <text x={slitX + 35} y="36" fill="#111827" fontWeight="950" fontSize="18">
         total scalar field Re&#123;E(x,y,t)&#125;
       </text>
       <text x="28" y={height - 18} fill="#111827" fontSize="14" fontWeight="850">
-        Color shows instantaneous signed field. The visible bright/dark directions come from interference.
+        Manual view zoom = {round(params.viewZoom, 2)}×. Right side samples Re&#123;E&#125; at the edge of the field.
       </text>
     </svg>
   );
@@ -356,6 +402,7 @@ export default function App() {
     wavelength: 0.72,
     angleMaxDeg: 35,
     animationSpeed: 1.0,
+    viewZoom: 1.0,
   });
 
   const [tick, setTick] = useState(0);
@@ -382,20 +429,21 @@ export default function App() {
       wavelength: 0.72,
       angleMaxDeg: 35,
       animationSpeed: 1.0,
+      viewZoom: 1.0,
     });
     setShowContours(false);
   }
 
   function singleSlitLike() {
-    setParams({ numSlits: 1, spacing: 1.4, wavelength: 0.72, angleMaxDeg: 35, animationSpeed: 1.0 });
+    setParams({ numSlits: 1, spacing: 1.4, wavelength: 0.72, angleMaxDeg: 35, animationSpeed: 1.0, viewZoom: 1.0 });
   }
 
   function classicDoubleSlit() {
-    setParams({ numSlits: 2, spacing: 1.55, wavelength: 0.72, angleMaxDeg: 35, animationSpeed: 1.0 });
+    setParams({ numSlits: 2, spacing: 1.55, wavelength: 0.72, angleMaxDeg: 35, animationSpeed: 1.0, viewZoom: 1.0 });
   }
 
   function gratingDemo() {
-    setParams({ numSlits: 7, spacing: 1.12, wavelength: 0.72, angleMaxDeg: 35, animationSpeed: 1.0 });
+    setParams({ numSlits: 7, spacing: 1.12, wavelength: 0.72, angleMaxDeg: 35, animationSpeed: 1.0, viewZoom: 1.0 });
   }
 
   const D = apertureSize(params.numSlits, params.spacing);
@@ -437,7 +485,7 @@ export default function App() {
             <div>
               <h2 className="section-title">Experiment controls</h2>
               <p className="section-subtitle">
-                The main image auto-zooms when the aperture becomes larger, so increasing the number of slits shows the full aperture instead of cropping the view.
+                The main image has a manual view zoom control. Zoom out to see more of a large aperture, or zoom in to inspect the near-slit field.
               </p>
             </div>
 
@@ -496,6 +544,17 @@ export default function App() {
               onChange={(v) => update("animationSpeed", v)}
             />
 
+            <SliderCard
+              label="View zoom"
+              hint="Manually zoom in or out of the aperture and field view."
+              value={params.viewZoom}
+              min={0.45}
+              max={2.2}
+              step={0.05}
+              unit="×"
+              onChange={(v) => update("viewZoom", v)}
+            />
+
             <div className="equation-box">
               <h3>Far-field check</h3>
               <p>
@@ -516,7 +575,7 @@ export default function App() {
                 <div>
                   <h2>Figure 1 — continuous scalar field</h2>
                   <p>
-                    This is the corrected view: incident plane waves on the left, and the total field after the slits on the right. The view zooms out automatically for larger aperture size.
+                    This is the corrected view: incident plane waves on the left, and the total field after the slits on the right. Use the View zoom slider to zoom in/out manually.
                     This is closer to the reference image than drawing independent circular wavefronts.
                   </p>
                 </div>
@@ -538,7 +597,8 @@ export default function App() {
               <div className="legend">
                 <span className="legend-item"><span className="dot green-dot" /> instantaneous scalar field</span>
                 <span className="legend-item"><span className="dot amber-dot" /> slit openings</span>
-                <span className="legend-item">auto zoom: {round(getAutoViewScale(params.numSlits, params.spacing), 1)} px/unit</span>
+                <span className="legend-item">view zoom: {round(params.viewZoom, 2)}×</span>
+                <span className="legend-item">right-side bars: Re&#123;E&#125;</span>
                 <span className="legend-item"><span className="dot violet-dot" /> optional phase contours</span>
               </div>
             </motion.div>

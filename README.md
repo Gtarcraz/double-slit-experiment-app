@@ -1,6 +1,12 @@
-# Double Slit Experiment App v5
+# Double Slit Experiment App v6
 
 Interactive Vite + React app for the double-slit and multi-slit wave interference experiment.
+
+## Changes in v6
+
+- Replaced automatic-only zoom with a user-controlled View zoom slider.
+- Added a right-edge histogram/trace of the real field Re{E} at the end of Figure 1.
+- The right-side bars show signed amplitude, not intensity.
 
 ## Changes in v5
 
