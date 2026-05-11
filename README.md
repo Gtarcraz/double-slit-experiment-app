@@ -1,35 +1,17 @@
-# Double Slit Experiment App v2
+# Double Slit Experiment App v3
 
 Interactive Vite + React app for the double-slit and multi-slit wave interference experiment.
 
-## Changes in v2
+## Changes in v3
 
-- Removed all wording about secondary-school students.
-- Observation plane is fixed to the far-field formulation.
-- Far-field intensity plot now uses angle θ and the N-slit array factor.
-- Added a second figure showing the total complex amplitude field, similar to a wave-optics interference image.
-- Corrected the maxima condition to:
-
-```math
-d\sin\theta=n\lambda
-```
-
-or equivalently:
-
-```math
-\sin\theta_n=\frac{n\lambda}{d}
-```
-
-## Features
-
-- Control number of slits
-- Control slit spacing
-- Control shared wavelength
-- Control angular viewing range
-- Moving wavefront visualization
-- Total complex amplitude field visualization
-- Far-field intensity/fringe plot
-- Classical wave-optics equations
+- Fixed equation rendering by removing KaTeX dependency and using robust HTML equations.
+- Replaced the broken Recharts intensity plot with a custom SVG far-field intensity plot.
+- Observation is forced into the far-field formulation.
+- Added a far-field check using aperture size D and Fraunhofer scale 2D²/λ.
+- Removed the remaining mention of secondary-school students.
+- Added a button to toggle between:
+  - total complex amplitude map
+  - Huygens wavefront lines
 
 ## Local Run
 
@@ -38,18 +20,12 @@ npm install
 npm run dev
 ```
 
-Open the Vite URL shown in the terminal, usually:
+## Deploy
+
+Push to GitHub and set:
 
 ```text
-http://localhost:5173
-```
-
-## GitHub Pages Deployment Using GitHub Actions
-
-Expected repo name:
-
-```text
-double-slit-experiment-app
+Settings → Pages → Source: GitHub Actions
 ```
 
 Expected public URL:
@@ -58,59 +34,12 @@ Expected public URL:
 https://gtarcraz.github.io/double-slit-experiment-app/
 ```
 
-### Push update to existing repo
-
-```bash
-git add .
-git commit -m "Update double slit app v2"
-git push
-```
-
-### GitHub Pages setting
-
-In GitHub:
-
-```text
-Settings → Pages → Source: GitHub Actions
-```
-
 ## Main Equations
 
-Total far-field complex amplitude:
-
-```math
-E(\theta)=\sum_{m=1}^N A_m e^{j k y_m\sin\theta}
-```
-
-Intensity:
-
-```math
-I(\theta)=|E(\theta)|^2
-```
-
-Wavenumber:
-
-```math
-k=\frac{2\pi}{\lambda}
-```
-
-Maxima condition:
-
-```math
-d\sin\theta=n\lambda
-```
-
-## QR Code
-
-The QR code points to:
-
 ```text
-https://gtarcraz.github.io/double-slit-experiment-app/
-```
-
-Files:
-
-```text
-public/qr-code.png
-public/qr-code-plain.png
+E(θ) = Σ_m A_m exp[j k y_m sin(θ)]
+I(θ) = |E(θ)|²
+k = 2π / λ
+d sin(θ) = n λ
+sin(θ_n) = n λ / d
 ```
