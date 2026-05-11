@@ -1,6 +1,12 @@
-# Double Slit Experiment App v4
+# Double Slit Experiment App v5
 
 Interactive Vite + React app for the double-slit and multi-slit wave interference experiment.
+
+## Changes in v5
+
+- Added automatic zoom-out for larger apertures.
+- Increasing the number of slits or slit spacing now rescales the vertical field view.
+- Added an aperture D guide in the main field plot.
 
 ## Changes in v4
 

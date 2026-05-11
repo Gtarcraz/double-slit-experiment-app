@@ -63,6 +63,27 @@ function fraunhoferDistance(numSlits, spacing, wavelength) {
   return Math.max(30, 2 * D * D / wavelength);
 }
 
+
+function getAutoViewScale(numSlits, spacing) {
+  /*
+    Auto zoom-out rule:
+    More slits or larger slit spacing means a larger aperture D.
+    The pixels-per-unit scale is reduced so the entire aperture remains visible.
+  */
+  const D = apertureSize(numSlits, spacing);
+  const targetAperturePixels = 410;
+  const maxScale = 88;
+  const minScale = 30;
+
+  if (D < 0.01) return 78;
+  return clamp(targetAperturePixels / D, minScale, maxScale);
+}
+
+function getSlitHalfHeight(numSlits, spacing) {
+  if (numSlits <= 1) return 18;
+  return clamp(0.13 * getAutoViewScale(numSlits, spacing) * spacing, 5, 15);
+}
+
 function computeFarFieldPattern({ numSlits, spacing, wavelength, angleMaxDeg }) {
   const slits = slitPositions(numSlits, spacing);
   const k = TWO_PI / wavelength;
@@ -182,7 +203,7 @@ function ColorScalarFieldSVG({ params, tick, showContours }) {
   const height = 610;
   const slitX = 125;
   const centerY = height / 2;
-  const pxPerUnit = 72;
+  const pxPerUnit = getAutoViewScale(params.numSlits, params.spacing);
   const slits = slitPositions(params.numSlits, params.spacing);
   const slitYs = slits.map((s) => centerY + s * pxPerUnit);
   const k = TWO_PI / params.wavelength;
@@ -240,7 +261,7 @@ function ColorScalarFieldSVG({ params, tick, showContours }) {
 
   const barrierSegments = [];
   let last = 0;
-  const slitHalfHeight = 12;
+  const slitHalfHeight = getSlitHalfHeight(params.numSlits, params.spacing);
   const sortedYs = [...slitYs].sort((a, b) => a - b);
   for (const y of sortedYs) {
     barrierSegments.push({ y1: last, y2: Math.max(last, y - slitHalfHeight) });
@@ -304,6 +325,18 @@ function ColorScalarFieldSVG({ params, tick, showContours }) {
           <text x={slitX + 14} y={y + 5} fill="#111827" fontWeight="900" fontSize="13">S{idx + 1}</text>
         </g>
       ))}
+
+      {/* aperture extent guide */}
+      {params.numSlits > 1 && (
+        <g>
+          <line x1={slitX - 26} y1={Math.min(...slitYs)} x2={slitX - 26} y2={Math.max(...slitYs)} stroke="#111827" strokeWidth="2" opacity="0.55" />
+          <line x1={slitX - 34} y1={Math.min(...slitYs)} x2={slitX - 18} y2={Math.min(...slitYs)} stroke="#111827" strokeWidth="2" opacity="0.55" />
+          <line x1={slitX - 34} y1={Math.max(...slitYs)} x2={slitX - 18} y2={Math.max(...slitYs)} stroke="#111827" strokeWidth="2" opacity="0.55" />
+          <text x={slitX - 90} y={centerY + 5} fill="#111827" fontWeight="900" fontSize="13">
+            aperture D
+          </text>
+        </g>
+      )}
 
       <text x="28" y="36" fill="#111827" fontWeight="950" fontSize="18">incident plane wave</text>
       <text x={slitX + 35} y="36" fill="#111827" fontWeight="950" fontSize="18">
@@ -382,7 +415,7 @@ export default function App() {
             <h1>Coherent waves form bright and dark interference directions</h1>
             <p>
               A monochromatic plane wave illuminates an aperture with one or more slits.
-              The visualization now plots the continuous scalar field, closer to the classical wave-optics picture.
+              The visualization plots the continuous scalar field. When the number of slits or slit distance increases, the aperture view automatically zooms out.
             </p>
           </div>
 
@@ -404,13 +437,13 @@ export default function App() {
             <div>
               <h2 className="section-title">Experiment controls</h2>
               <p className="section-subtitle">
-                The main image shows the total field. The far-field intensity plot is calculated separately from the angular N-slit array factor.
+                The main image auto-zooms when the aperture becomes larger, so increasing the number of slits shows the full aperture instead of cropping the view.
               </p>
             </div>
 
             <SliderCard
               label="Number of slits"
-              hint="2 gives the classic double-slit response. More slits approach a grating response."
+              hint="More slits increase the aperture size. The field view automatically zooms out."
               value={params.numSlits}
               min={1}
               max={9}
@@ -483,7 +516,7 @@ export default function App() {
                 <div>
                   <h2>Figure 1 — continuous scalar field</h2>
                   <p>
-                    This is the corrected view: incident plane waves on the left, and the total field after the slits on the right.
+                    This is the corrected view: incident plane waves on the left, and the total field after the slits on the right. The view zooms out automatically for larger aperture size.
                     This is closer to the reference image than drawing independent circular wavefronts.
                   </p>
                 </div>
@@ -505,6 +538,7 @@ export default function App() {
               <div className="legend">
                 <span className="legend-item"><span className="dot green-dot" /> instantaneous scalar field</span>
                 <span className="legend-item"><span className="dot amber-dot" /> slit openings</span>
+                <span className="legend-item">auto zoom: {round(getAutoViewScale(params.numSlits, params.spacing), 1)} px/unit</span>
                 <span className="legend-item"><span className="dot violet-dot" /> optional phase contours</span>
               </div>
             </motion.div>
