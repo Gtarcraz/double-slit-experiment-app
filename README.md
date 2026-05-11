@@ -1,17 +1,35 @@
-# Double Slit Experiment App
+# Double Slit Experiment App v2
 
-Interactive Vite + React teaching app for the double-slit and multi-slit wave interference experiment.
+Interactive Vite + React app for the double-slit and multi-slit wave interference experiment.
+
+## Changes in v2
+
+- Removed all wording about secondary-school students.
+- Observation plane is fixed to the far-field formulation.
+- Far-field intensity plot now uses angle θ and the N-slit array factor.
+- Added a second figure showing the total complex amplitude field, similar to a wave-optics interference image.
+- Corrected the maxima condition to:
+
+```math
+d\sin\theta=n\lambda
+```
+
+or equivalently:
+
+```math
+\sin\theta_n=\frac{n\lambda}{d}
+```
 
 ## Features
 
-- Control the number of slits
+- Control number of slits
 - Control slit spacing
-- Control observation-plane distance
-- Control observation-plane height
-- One shared wavelength/frequency
+- Control shared wavelength
+- Control angular viewing range
 - Moving wavefront visualization
-- Screen intensity/fringe plot
-- Explanation of the experiment and core equations
+- Total complex amplitude field visualization
+- Far-field intensity/fringe plot
+- Classical wave-optics equations
 
 ## Local Run
 
@@ -28,8 +46,6 @@ http://localhost:5173
 
 ## GitHub Pages Deployment Using GitHub Actions
 
-This project is ready for deployment through GitHub Actions.
-
 Expected repo name:
 
 ```text
@@ -42,18 +58,15 @@ Expected public URL:
 https://gtarcraz.github.io/double-slit-experiment-app/
 ```
 
-### 1. Push to GitHub
+### Push update to existing repo
 
 ```bash
-git init
 git add .
-git commit -m "Initial double slit experiment app"
-git branch -M main
-git remote add origin git@github.com:Gtarcraz/double-slit-experiment-app.git
-git push -u origin main
+git commit -m "Update double slit app v2"
+git push
 ```
 
-### 2. Set GitHub Pages source
+### GitHub Pages setting
 
 In GitHub:
 
@@ -61,26 +74,18 @@ In GitHub:
 Settings → Pages → Source: GitHub Actions
 ```
 
-### 3. Watch deployment
-
-Go to:
-
-```text
-Actions → Deploy Vite React App to GitHub Pages
-```
-
 ## Main Equations
 
-Total field from N slits:
+Total far-field complex amplitude:
 
 ```math
-E(y)=\sum_{m=1}^N A_m e^{jkr_m(y)}
+E(\theta)=\sum_{m=1}^N A_m e^{j k y_m\sin\theta}
 ```
 
-Intensity on the observation plane:
+Intensity:
 
 ```math
-I(y)=|E(y)|^2
+I(\theta)=|E(\theta)|^2
 ```
 
 Wavenumber:
@@ -89,10 +94,10 @@ Wavenumber:
 k=\frac{2\pi}{\lambda}
 ```
 
-Far-field bright-fringe condition:
+Maxima condition:
 
 ```math
-d\sin\theta=m\lambda
+d\sin\theta=n\lambda
 ```
 
 ## QR Code
@@ -109,5 +114,3 @@ Files:
 public/qr-code.png
 public/qr-code-plain.png
 ```
-
-Use `public/qr-code.png` in PowerPoint slides.
