@@ -1,5 +1,5 @@
 
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { Atom, Eye, MoveHorizontal, RotateCcw, Sparkles, Waves } from "lucide-react";
 
@@ -124,6 +124,15 @@ function colorMapTurboLike(v) {
   return `rgb(${r},${g},${b})`;
 }
 
+function colorMapTurboRGB(v) {
+  const x = clamp(v, 0, 1);
+  const r = Math.floor(255 * clamp(1.5 - Math.abs(4 * x - 3), 0, 1));
+  const g = Math.floor(255 * clamp(1.5 - Math.abs(4 * x - 2), 0, 1));
+  const b = Math.floor(255 * clamp(1.5 - Math.abs(4 * x - 1), 0, 1));
+  return [r, g, b];
+}
+
+
 function FarFieldIntensityPlot({ params }) {
   const width = 900;
   const height = 380;
@@ -202,196 +211,285 @@ function FarFieldIntensityPlot({ params }) {
   This is much closer to the reference picture than drawing separate circles.
 */
 
-function ColorScalarFieldSVG({ params, tick, showContours }) {
-  const width = 1000;
-  const height = 610;
-  const slitX = 125;
-  const screenX = 885;
-  const centerY = height / 2;
-  const pxPerUnit = getViewScale(params);
-  const slits = slitPositions(params.numSlits, params.spacing);
-  const slitYs = slits.map((s) => centerY + s * pxPerUnit);
-  const k = TWO_PI / params.wavelength;
-  const omegaT = tick * 0.115 * params.animationSpeed;
 
-  const cols = 160;
-  const rows = 108;
-  const dx = screenX / cols;
-  const dy = height / rows;
-  const cells = [];
+function ColorScalarFieldCanvas({ params, tick, showContours, edgeMode }) {
+  const canvasRef = useRef(null);
 
-  let maxA = 1e-9;
-  const raw = [];
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
 
-  function fieldAtPixel(px, py) {
-    if (px < slitX - 4) {
-      const xModel = (px - slitX) / pxPerUnit;
-      return Math.cos(k * xModel - omegaT);
+    const width = 1000;
+    const height = 610;
+    const slitX = 125;
+    const screenX = 885;
+    const centerY = height / 2;
+    const pxPerUnit = getViewScale(params);
+    const slits = slitPositions(params.numSlits, params.spacing);
+    const slitYs = slits.map((s) => centerY + s * pxPerUnit);
+    const k = TWO_PI / params.wavelength;
+    const omegaT = tick * 0.115 * params.animationSpeed;
+
+    /*
+      v7 high-resolution renderer:
+      Previous SVG version used about 160 x 108 = 17,280 field cells.
+      This canvas version uses 560 x 320 = 179,200 samples,
+      which is more than 10x the field-sampling resolution.
+    */
+    const fieldW = screenX;
+    const fieldH = height;
+    const cols = 560;
+    const rows = 320;
+
+    const ctx = canvas.getContext("2d", { alpha: false });
+    canvas.width = width;
+    canvas.height = height;
+    ctx.clearRect(0, 0, width, height);
+    ctx.fillStyle = "#020617";
+    ctx.fillRect(0, 0, width, height);
+
+    const img = ctx.createImageData(cols, rows);
+    const valuesRe = new Float32Array(cols * rows);
+    const valuesMag = new Float32Array(cols * rows);
+
+    let maxAbsRe = 1e-9;
+    let maxMag = 1e-9;
+
+    function fieldComplexAtPixel(px, py) {
+      if (px < slitX - 4) {
+        const xModel = (px - slitX) / pxPerUnit;
+        const phase = k * xModel - omegaT;
+        return [Math.cos(phase), Math.sin(phase)];
+      }
+
+      const xModel = Math.max(0.04, (px - slitX) / pxPerUnit);
+      const yModel = (py - centerY) / pxPerUnit;
+      let re = 0;
+      let im = 0;
+
+      for (const ys of slits) {
+        const r = Math.sqrt(xModel * xModel + (yModel - ys) * (yModel - ys));
+        const amp = 1 / Math.sqrt(Math.max(r, 0.08));
+        const phase = k * r - omegaT;
+        re += amp * Math.cos(phase);
+        im += amp * Math.sin(phase);
+      }
+
+      const scale = Math.sqrt(params.numSlits);
+      return [re / scale, im / scale];
     }
 
-    const xModel = Math.max(0.04, (px - slitX) / pxPerUnit);
-    const yModel = (py - centerY) / pxPerUnit;
-    let e = 0;
-
-    for (const ys of slits) {
-      const r = Math.sqrt(xModel * xModel + (yModel - ys) * (yModel - ys));
-      const amp = 1 / Math.sqrt(Math.max(r, 0.08));
-      e += amp * Math.cos(k * r - omegaT);
-    }
-
-    return e / Math.sqrt(params.numSlits);
-  }
-
-  for (let ix = 0; ix < cols; ix++) {
+    // First pass: compute values and normalization.
     for (let iy = 0; iy < rows; iy++) {
-      const px = ix * dx + dx * 0.5;
-      const py = iy * dy + dy * 0.5;
-      const e = fieldAtPixel(px, py);
-      maxA = Math.max(maxA, Math.abs(e));
-      raw.push({ ix, iy, e });
-    }
-  }
-
-  for (const p of raw) {
-    const norm = 0.5 + 0.5 * Math.tanh(1.35 * p.e / maxA);
-    cells.push({
-      x: p.ix * dx,
-      y: p.iy * dy,
-      w: dx + 0.4,
-      h: dy + 0.4,
-      color: colorMapTurboLike(norm),
-    });
-  }
-
-  const screenSamples = [];
-  const sampleCount = 180;
-  let maxScreenAbs = 1e-9;
-  const screenSampleX = screenX - 18;
-
-  for (let i = 0; i < sampleCount; i++) {
-    const y = 22 + (i / (sampleCount - 1)) * (height - 44);
-    const e = fieldAtPixel(screenSampleX, y);
-    maxScreenAbs = Math.max(maxScreenAbs, Math.abs(e));
-    screenSamples.push({ y, e });
-  }
-
-  const barrierSegments = [];
-  let last = 0;
-  const slitHalfHeight = getSlitHalfHeight(params);
-  const sortedYs = [...slitYs].sort((a, b) => a - b);
-  for (const y of sortedYs) {
-    barrierSegments.push({ y1: last, y2: Math.max(last, y - slitHalfHeight) });
-    last = Math.min(height, y + slitHalfHeight);
-  }
-  barrierSegments.push({ y1: last, y2: height });
-
-  const contourRings = [];
-  if (showContours) {
-    const wavelengthPx = params.wavelength * pxPerUnit;
-    const phaseShift = (tick * params.animationSpeed * 2.5) % wavelengthPx;
-    for (const y of slitYs) {
-      for (let r = phaseShift; r < 1100; r += wavelengthPx) {
-        if (r > 10) contourRings.push({ x: slitX, y, r });
+      const py = (iy + 0.5) * fieldH / rows;
+      for (let ix = 0; ix < cols; ix++) {
+        const px = (ix + 0.5) * fieldW / cols;
+        const [re, im] = fieldComplexAtPixel(px, py);
+        const idx = iy * cols + ix;
+        const mag = Math.sqrt(re * re + im * im);
+        valuesRe[idx] = re;
+        valuesMag[idx] = mag;
+        maxAbsRe = Math.max(maxAbsRe, Math.abs(re));
+        maxMag = Math.max(maxMag, mag);
       }
     }
-  }
+
+    // Second pass: colorize. The image itself is still signed Re{E}, like the reference.
+    for (let iy = 0; iy < rows; iy++) {
+      for (let ix = 0; ix < cols; ix++) {
+        const idx = iy * cols + ix;
+        const re = valuesRe[idx];
+        const norm = 0.5 + 0.5 * Math.tanh(1.35 * re / maxAbsRe);
+        const [r, g, b] = colorMapTurboRGB(norm);
+        const p = idx * 4;
+        img.data[p] = r;
+        img.data[p + 1] = g;
+        img.data[p + 2] = b;
+        img.data[p + 3] = 255;
+      }
+    }
+
+    const off = document.createElement("canvas");
+    off.width = cols;
+    off.height = rows;
+    const offCtx = off.getContext("2d", { alpha: false });
+    offCtx.putImageData(img, 0, 0);
+
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(off, 0, 0, fieldW, fieldH);
+
+    // Optional phase contour overlay.
+    if (showContours) {
+      const wavelengthPx = params.wavelength * pxPerUnit;
+      const phaseShift = (tick * params.animationSpeed * 2.5) % wavelengthPx;
+      ctx.save();
+      ctx.strokeStyle = "rgba(0, 17, 31, 0.22)";
+      ctx.lineWidth = 1.1;
+
+      for (const y of slitYs) {
+        for (let r = phaseShift; r < 1100; r += wavelengthPx) {
+          if (r > 10) {
+            ctx.globalAlpha = clamp(0.34 - r / 2200, 0.03, 0.26);
+            ctx.beginPath();
+            ctx.arc(slitX, y, r, 0, TWO_PI);
+            ctx.stroke();
+          }
+        }
+      }
+      ctx.restore();
+    }
+
+    // Aperture screen and slits.
+    const slitHalfHeight = getSlitHalfHeight(params);
+    const sortedYs = [...slitYs].sort((a, b) => a - b);
+    let last = 0;
+
+    ctx.save();
+    ctx.fillStyle = "rgba(229, 231, 235, 0.96)";
+
+    for (const y of sortedYs) {
+      const y1 = last;
+      const y2 = Math.max(last, y - slitHalfHeight);
+      ctx.fillRect(slitX - 8, y1, 16, Math.max(0, y2 - y1));
+      last = Math.min(height, y + slitHalfHeight);
+    }
+    ctx.fillRect(slitX - 8, last, 16, Math.max(0, height - last));
+
+    // Slit labels.
+    ctx.font = "900 13px Inter, system-ui, sans-serif";
+    ctx.textBaseline = "middle";
+    for (let i = 0; i < slitYs.length; i++) {
+      const y = slitYs[i];
+      ctx.fillStyle = "#111827";
+      ctx.beginPath();
+      ctx.arc(slitX, y, 4.8, 0, TWO_PI);
+      ctx.fill();
+      ctx.fillStyle = "#fbbf24";
+      ctx.beginPath();
+      ctx.arc(slitX, y, 2.5, 0, TWO_PI);
+      ctx.fill();
+      ctx.fillStyle = "#111827";
+      ctx.fillText(`S${i + 1}`, slitX + 14, y);
+    }
+    ctx.restore();
+
+    // Aperture D bracket.
+    if (params.numSlits > 1) {
+      const yMin = Math.min(...slitYs);
+      const yMax = Math.max(...slitYs);
+      ctx.save();
+      ctx.strokeStyle = "rgba(17, 24, 39, 0.55)";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(slitX - 26, yMin);
+      ctx.lineTo(slitX - 26, yMax);
+      ctx.moveTo(slitX - 34, yMin);
+      ctx.lineTo(slitX - 18, yMin);
+      ctx.moveTo(slitX - 34, yMax);
+      ctx.lineTo(slitX - 18, yMax);
+      ctx.stroke();
+      ctx.fillStyle = "#111827";
+      ctx.font = "900 13px Inter, system-ui, sans-serif";
+      ctx.fillText("aperture D", slitX - 90, centerY + 5);
+      ctx.restore();
+    }
+
+    // Right-edge switchable trace: signed Re{E} or complex magnitude |E|.
+    ctx.save();
+    ctx.fillStyle = "rgba(2, 6, 23, 0.78)";
+    ctx.fillRect(screenX, 0, width - screenX, height);
+
+    ctx.setLineDash([8, 8]);
+    ctx.strokeStyle = "#ffffff";
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(screenX, 0);
+    ctx.lineTo(screenX, height);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    ctx.fillStyle = "#ffffff";
+    ctx.font = "900 15px Inter, system-ui, sans-serif";
+    ctx.fillText(edgeMode === "magnitude" ? "right-edge |E|" : "right-edge Re{E}", screenX + 12, 30);
+    ctx.fillStyle = "#cbd5e1";
+    ctx.font = "12px Inter, system-ui, sans-serif";
+    ctx.fillText(edgeMode === "magnitude" ? "complex magnitude field" : "signed real field", screenX + 12, 51);
+
+    const sampleCount = 220;
+    const screenSampleX = screenX - 18;
+    const samples = [];
+    let maxTrace = 1e-9;
+
+    for (let i = 0; i < sampleCount; i++) {
+      const y = 22 + (i / (sampleCount - 1)) * (height - 44);
+      const [re, im] = fieldComplexAtPixel(screenSampleX, y);
+      const mag = Math.sqrt(re * re + im * im);
+      const val = edgeMode === "magnitude" ? mag : re;
+      maxTrace = Math.max(maxTrace, Math.abs(val));
+      samples.push({ y, val });
+    }
+
+    const x0 = screenX + 58;
+    ctx.strokeStyle = "rgba(226, 232, 240, 0.9)";
+    ctx.lineWidth = 1.3;
+    ctx.beginPath();
+    ctx.moveTo(x0, 74);
+    ctx.lineTo(x0, height - 22);
+    ctx.stroke();
+
+    // bars
+    ctx.lineWidth = 2.0;
+    for (const s of samples) {
+      const normalized = s.val / maxTrace;
+      const bar = normalized * 46;
+      ctx.strokeStyle = edgeMode === "magnitude"
+        ? "#fbbf24"
+        : normalized >= 0 ? "#22d3ee" : "#fb7185";
+      ctx.globalAlpha = 0.88;
+      ctx.beginPath();
+      ctx.moveTo(x0, s.y);
+      ctx.lineTo(x0 + bar, s.y);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+
+    // smooth trace curve overlay
+    ctx.lineWidth = 2.5;
+    ctx.strokeStyle = edgeMode === "magnitude" ? "#fde68a" : "#ffffff";
+    ctx.beginPath();
+    samples.forEach((s, i) => {
+      const normalized = s.val / maxTrace;
+      const x = x0 + normalized * 46;
+      if (i === 0) ctx.moveTo(x, s.y);
+      else ctx.lineTo(x, s.y);
+    });
+    ctx.stroke();
+
+    ctx.fillStyle = "#e2e8f0";
+    ctx.font = "12px Inter, system-ui, sans-serif";
+    ctx.fillText(edgeMode === "magnitude" ? "|E| ≥ 0 amplitude envelope" : "signed amplitude, not intensity", screenX + 12, height - 20);
+    ctx.restore();
+
+    // Labels last, for readability.
+    ctx.save();
+    ctx.fillStyle = "#111827";
+    ctx.font = "950 18px Inter, system-ui, sans-serif";
+    ctx.fillText("incident plane wave", 28, 36);
+    ctx.fillText("total scalar field Re{E(x,y,t)}", slitX + 35, 36);
+
+    ctx.font = "850 14px Inter, system-ui, sans-serif";
+    ctx.fillText(`Manual view zoom = ${round(params.viewZoom, 2)}×. Resolution: ${cols}×${rows} field samples.`, 28, height - 18);
+    ctx.restore();
+  }, [params, tick, showContours, edgeMode]);
 
   return (
-    <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Colored total scalar field with real-field histogram">
-      <rect width={width} height={height} fill="#020617" />
-
-      {cells.map((c, idx) => (
-        <rect key={idx} x={c.x} y={c.y} width={c.w} height={c.h} fill={c.color} />
-      ))}
-
-      {showContours && (
-        <g>
-          {contourRings.map((ring, idx) => (
-            <circle
-              key={`ring-${idx}`}
-              cx={ring.x}
-              cy={ring.y}
-              r={ring.r}
-              fill="none"
-              stroke="#00111f"
-              strokeWidth="1.1"
-              opacity={clamp(0.34 - ring.r / 2200, 0.03, 0.26)}
-            />
-          ))}
-        </g>
-      )}
-
-      {/* aperture screen */}
-      {barrierSegments.map((seg, idx) => (
-        <rect
-          key={`barrier-${idx}`}
-          x={slitX - 8}
-          y={seg.y1}
-          width={16}
-          height={Math.max(0, seg.y2 - seg.y1)}
-          fill="#e5e7eb"
-          opacity="0.96"
-        />
-      ))}
-
-      {slitYs.map((y, idx) => (
-        <g key={`source-${idx}`}>
-          <circle cx={slitX} cy={y} r="4.8" fill="#111827" />
-          <circle cx={slitX} cy={y} r="2.5" fill="#fbbf24" />
-          <text x={slitX + 14} y={y + 5} fill="#111827" fontWeight="900" fontSize="13">S{idx + 1}</text>
-        </g>
-      ))}
-
-      {/* aperture extent guide */}
-      {params.numSlits > 1 && (
-        <g>
-          <line x1={slitX - 26} y1={Math.min(...slitYs)} x2={slitX - 26} y2={Math.max(...slitYs)} stroke="#111827" strokeWidth="2" opacity="0.55" />
-          <line x1={slitX - 34} y1={Math.min(...slitYs)} x2={slitX - 18} y2={Math.min(...slitYs)} stroke="#111827" strokeWidth="2" opacity="0.55" />
-          <line x1={slitX - 34} y1={Math.max(...slitYs)} x2={slitX - 18} y2={Math.max(...slitYs)} stroke="#111827" strokeWidth="2" opacity="0.55" />
-          <text x={slitX - 90} y={centerY + 5} fill="#111827" fontWeight="900" fontSize="13">aperture D</text>
-        </g>
-      )}
-
-      {/* right-edge real field histogram / trace */}
-      <g>
-        <rect x={screenX} y="0" width={width - screenX} height={height} fill="rgba(2,6,23,0.72)" />
-        <line x1={screenX} y1="0" x2={screenX} y2={height} stroke="#ffffff" strokeWidth="3" strokeDasharray="8 8" />
-        <text x={screenX + 12} y="30" fill="#ffffff" fontSize="15" fontWeight="900">right-edge Re&#123;E&#125;</text>
-        <text x={screenX + 12} y="51" fill="#cbd5e1" fontSize="12">horizontal bars show signed real field</text>
-
-        {screenSamples.map((s, idx) => {
-          const normalized = s.e / maxScreenAbs;
-          const bar = normalized * 46;
-          const x0 = screenX + 58;
-          const color = normalized >= 0 ? "#22d3ee" : "#fb7185";
-          return (
-            <line
-              key={`sample-${idx}`}
-              x1={x0}
-              y1={s.y}
-              x2={x0 + bar}
-              y2={s.y}
-              stroke={color}
-              strokeWidth="2.1"
-              opacity="0.85"
-            />
-          );
-        })}
-
-        <line x1={screenX + 58} y1="74" x2={screenX + 58} y2={height - 22} stroke="#e2e8f0" strokeWidth="1.3" opacity="0.9" />
-        <text x={screenX + 14} y={height - 20} fill="#e2e8f0" fontSize="12">
-          This is amplitude, not intensity.
-        </text>
-      </g>
-
-      <text x="28" y="36" fill="#111827" fontWeight="950" fontSize="18">incident plane wave</text>
-      <text x={slitX + 35} y="36" fill="#111827" fontWeight="950" fontSize="18">
-        total scalar field Re&#123;E(x,y,t)&#125;
-      </text>
-      <text x="28" y={height - 18} fill="#111827" fontSize="14" fontWeight="850">
-        Manual view zoom = {round(params.viewZoom, 2)}×. Right side samples Re&#123;E&#125; at the edge of the field.
-      </text>
-    </svg>
+    <canvas
+      ref={canvasRef}
+      width={1000}
+      height={610}
+      style={{ width: "100%", height: "100%", display: "block" }}
+      aria-label="High-resolution scalar field with switchable right-edge trace"
+    />
   );
 }
 
@@ -407,6 +505,7 @@ export default function App() {
 
   const [tick, setTick] = useState(0);
   const [showContours, setShowContours] = useState(false);
+  const [edgeMode, setEdgeMode] = useState("real");
 
   React.useEffect(() => {
     let raf = 0;
@@ -432,6 +531,7 @@ export default function App() {
       viewZoom: 1.0,
     });
     setShowContours(false);
+    setEdgeMode("real");
   }
 
   function singleSlitLike() {
@@ -485,7 +585,7 @@ export default function App() {
             <div>
               <h2 className="section-title">Experiment controls</h2>
               <p className="section-subtitle">
-                The main image has a manual view zoom control. Zoom out to see more of a large aperture, or zoom in to inspect the near-slit field.
+                The main image uses a high-resolution canvas renderer. Zoom out to see more of a large aperture, or zoom in to inspect the near-slit field.
               </p>
             </div>
 
@@ -575,7 +675,7 @@ export default function App() {
                 <div>
                   <h2>Figure 1 — continuous scalar field</h2>
                   <p>
-                    This is the corrected view: incident plane waves on the left, and the total field after the slits on the right. Use the View zoom slider to zoom in/out manually.
+                    This is the corrected high-resolution view: incident plane waves on the left, and the total field after the slits on the right. Use the View zoom slider to zoom in/out manually.
                     This is closer to the reference image than drawing independent circular wavefronts.
                   </p>
                 </div>
@@ -587,18 +687,24 @@ export default function App() {
                   <button className={showContours ? "btn" : "btn secondary"} onClick={() => setShowContours(true)}>
                     Color + contours
                   </button>
+                  <button className={edgeMode === "real" ? "btn" : "btn secondary"} onClick={() => setEdgeMode("real")}>
+                    Right: Re&#123;E&#125;
+                  </button>
+                  <button className={edgeMode === "magnitude" ? "btn" : "btn secondary"} onClick={() => setEdgeMode("magnitude")}>
+                    Right: |E|
+                  </button>
                 </div>
               </div>
 
               <div className="canvas-wrap">
-                <ColorScalarFieldSVG params={params} tick={tick} showContours={showContours} />
+                <ColorScalarFieldCanvas params={params} tick={tick} showContours={showContours} edgeMode={edgeMode} />
               </div>
 
               <div className="legend">
                 <span className="legend-item"><span className="dot green-dot" /> instantaneous scalar field</span>
                 <span className="legend-item"><span className="dot amber-dot" /> slit openings</span>
                 <span className="legend-item">view zoom: {round(params.viewZoom, 2)}×</span>
-                <span className="legend-item">right-side bars: Re&#123;E&#125;</span>
+                <span className="legend-item">right trace: {edgeMode === "magnitude" ? "|E|" : "Re{E}"}</span>
                 <span className="legend-item"><span className="dot violet-dot" /> optional phase contours</span>
               </div>
             </motion.div>

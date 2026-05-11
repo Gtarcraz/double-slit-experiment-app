@@ -1,6 +1,15 @@
-# Double Slit Experiment App v6
+# Double Slit Experiment App v7
 
 Interactive Vite + React app for the double-slit and multi-slit wave interference experiment.
+
+## Changes in v7
+
+- Replaced SVG cell field rendering with a high-resolution canvas renderer.
+- Field grid increased from about 17k cells to about 179k samples, more than 10x higher resolution.
+- Added switchable right-edge trace:
+  - Re{E}: signed real field
+  - |E|: complex field magnitude
+- Added a smooth curve overlay on the right trace.
 
 ## Changes in v6
 
