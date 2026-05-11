@@ -1,17 +1,16 @@
-# Double Slit Experiment App v3
+# Double Slit Experiment App v4
 
 Interactive Vite + React app for the double-slit and multi-slit wave interference experiment.
 
-## Changes in v3
+## Changes in v4
 
-- Fixed equation rendering by removing KaTeX dependency and using robust HTML equations.
-- Replaced the broken Recharts intensity plot with a custom SVG far-field intensity plot.
-- Observation is forced into the far-field formulation.
-- Added a far-field check using aperture size D and Fraunhofer scale 2D²/λ.
-- Removed the remaining mention of secondary-school students.
-- Added a button to toggle between:
-  - total complex amplitude map
-  - Huygens wavefront lines
+- Replaced the misleading independent-ring wavefront view with a continuous colored scalar field.
+- The main image now resembles a classical wave-optics field plot:
+  - incident plane wave before the aperture
+  - total summed field after the slits
+- Added optional contour overlay.
+- Kept the far-field intensity plot based on the N-slit array factor.
+- Removed extra plotting libraries for reliability.
 
 ## Local Run
 
@@ -37,6 +36,7 @@ https://gtarcraz.github.io/double-slit-experiment-app/
 ## Main Equations
 
 ```text
+E(x,y,t) = Σ_m A_m cos(k r_m − ωt)
 E(θ) = Σ_m A_m exp[j k y_m sin(θ)]
 I(θ) = |E(θ)|²
 k = 2π / λ

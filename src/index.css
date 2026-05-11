@@ -8,7 +8,7 @@ body {
   background: #020617;
 }
 
-button, input, select { font: inherit; }
+button, input { font: inherit; }
 
 .app {
   min-height: 100vh;
@@ -20,7 +20,7 @@ button, input, select { font: inherit; }
 }
 
 .shell {
-  max-width: 1460px;
+  max-width: 1480px;
   margin: 0 auto;
   display: grid;
   gap: 20px;
@@ -177,7 +177,7 @@ input[type="range"] {
 
 .canvas-wrap {
   width: 100%;
-  height: 580px;
+  height: 610px;
   border-radius: 24px;
   overflow: hidden;
   background: #020617;
@@ -217,10 +217,11 @@ input[type="range"] {
   display: inline-block;
 }
 
-.blue-dot { background: #38bdf8; }
+.blue-dot { background: #00c8ff; }
 .amber-dot { background: #f59e0b; }
 .violet-dot { background: #8b5cf6; }
-.red-dot { background: #f43f5e; }
+.red-dot { background: #ff2f70; }
+.green-dot { background: #3cff00; }
 
 .two-col {
   display: grid;
@@ -256,7 +257,7 @@ input[type="range"] {
   border: 1px solid #e2e8f0;
   border-radius: 18px;
   margin: 10px 0;
-  font-size: clamp(1.0rem, 2.2vw, 1.38rem);
+  font-size: clamp(1.0rem, 2.2vw, 1.32rem);
   font-family: "Times New Roman", Cambria, Georgia, serif;
   text-align: center;
   line-height: 1.55;

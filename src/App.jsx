@@ -63,11 +63,6 @@ function fraunhoferDistance(numSlits, spacing, wavelength) {
   return Math.max(30, 2 * D * D / wavelength);
 }
 
-/*
-  Far-field N-slit array factor:
-    E(theta) = sum_m exp(j k y_m sin(theta))
-    I(theta) = |E(theta)|^2 / N^2
-*/
 function computeFarFieldPattern({ numSlits, spacing, wavelength, angleMaxDeg }) {
   const slits = slitPositions(numSlits, spacing);
   const k = TWO_PI / wavelength;
@@ -90,6 +85,19 @@ function computeFarFieldPattern({ numSlits, spacing, wavelength, angleMaxDeg }) 
   }
 
   return out;
+}
+
+function colorMapTurboLike(v) {
+  /*
+    Lightweight rainbow/turbo-like map.
+    v is expected from 0 to 1.
+    This gives the red/yellow/green/cyan/blue feeling of the reference image.
+  */
+  const x = clamp(v, 0, 1);
+  const r = Math.floor(255 * clamp(1.5 - Math.abs(4 * x - 3), 0, 1));
+  const g = Math.floor(255 * clamp(1.5 - Math.abs(4 * x - 2), 0, 1));
+  const b = Math.floor(255 * clamp(1.5 - Math.abs(4 * x - 1), 0, 1));
+  return `rgb(${r},${g},${b})`;
 }
 
 function FarFieldIntensityPlot({ params }) {
@@ -128,7 +136,6 @@ function FarFieldIntensityPlot({ params }) {
     <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Far field intensity plot">
       <rect width={width} height={height} fill="#ffffff" />
 
-      {/* grid */}
       {xTicks.map((t, idx) => (
         <g key={`xt-${idx}`}>
           <line x1={xScale(t)} y1={padT} x2={xScale(t)} y2={padT + plotH} stroke="#dbe3ef" strokeDasharray="4 5" />
@@ -152,61 +159,83 @@ function FarFieldIntensityPlot({ params }) {
       <text x="22" y={height / 2 + 40} transform={`rotate(-90 22 ${height / 2 + 40})`} textAnchor="middle" fill="#475569" fontSize="15" fontWeight="700">normalized intensity I(θ)</text>
 
       <text x={padL} y="20" fill="#0f172a" fontSize="15" fontWeight="800">
-        Far-field pattern: sharp peaks mean constructive interference
+        Far-field pattern from the N-slit array factor
       </text>
     </svg>
   );
 }
 
-function AmplitudeMapSVG({ params, tick }) {
+/*
+  This is the corrected main visual.
+
+  Left of the aperture:
+    incident plane wave, E = cos(kx - wt)
+
+  Right of the aperture:
+    total scalar field from slit wavelets,
+    E = sum_m cos(k r_m - wt) / sqrt(r_m)
+
+  This is much closer to the reference picture than drawing separate circles.
+*/
+function ColorScalarFieldSVG({ params, tick, showContours }) {
   const width = 1000;
-  const height = 580;
-  const slitX = 120;
+  const height = 610;
+  const slitX = 125;
   const centerY = height / 2;
-  const pxPerUnit = 70;
+  const pxPerUnit = 72;
   const slits = slitPositions(params.numSlits, params.spacing);
   const slitYs = slits.map((s) => centerY + s * pxPerUnit);
   const k = TWO_PI / params.wavelength;
-  const omegaT = tick * 0.12 * params.animationSpeed;
+  const omegaT = tick * 0.115 * params.animationSpeed;
 
-  const cols = 135;
-  const rows = 82;
-  const x0 = slitX + 10;
-  const x1 = width - 55;
-  const y0 = 26;
-  const y1 = height - 32;
-  const dx = (x1 - x0) / cols;
-  const dy = (y1 - y0) / rows;
-
+  const cols = 175;
+  const rows = 110;
+  const dx = width / cols;
+  const dy = height / rows;
   const cells = [];
+
+  let maxA = 1e-9;
+  const raw = [];
+
   for (let ix = 0; ix < cols; ix++) {
     for (let iy = 0; iy < rows; iy++) {
-      const px = x0 + ix * dx;
-      const py = y0 + iy * dy;
-      const xModel = Math.max(0.03, (px - slitX) / pxPerUnit);
-      const yModel = (py - centerY) / pxPerUnit;
+      const px = ix * dx + dx * 0.5;
+      const py = iy * dy + dy * 0.5;
 
-      let re = 0;
-      let im = 0;
+      let e = 0;
 
-      for (const ys of slits) {
-        const r = Math.sqrt(xModel * xModel + (yModel - ys) * (yModel - ys));
-        const amp = 1 / Math.sqrt(Math.max(r, 0.06));
-        const phase = k * r - omegaT;
-        re += amp * Math.cos(phase);
-        im += amp * Math.sin(phase);
+      if (px < slitX - 4) {
+        // plane wave on the incident side
+        const xModel = (px - slitX) / pxPerUnit;
+        e = Math.cos(k * xModel - omegaT);
+      } else {
+        const xModel = Math.max(0.04, (px - slitX) / pxPerUnit);
+        const yModel = (py - centerY) / pxPerUnit;
+
+        for (const ys of slits) {
+          const r = Math.sqrt(xModel * xModel + (yModel - ys) * (yModel - ys));
+          const amp = 1 / Math.sqrt(Math.max(r, 0.08));
+          e += amp * Math.cos(k * r - omegaT);
+        }
+
+        // mild normalization so 1 slit and many slits both look good
+        e /= Math.sqrt(params.numSlits);
       }
 
-      const mag = Math.sqrt(re * re + im * im);
-      const signed = Math.tanh(re / Math.sqrt(params.numSlits));
-      const brightness = clamp(mag / (1.65 * params.numSlits), 0, 1);
-      const alpha = 0.16 + 0.84 * brightness;
-      const color = signed >= 0
-        ? `rgba(34,211,238,${alpha})`
-        : `rgba(244,63,94,${alpha})`;
-
-      cells.push({ x: px, y: py, w: dx + 0.25, h: dy + 0.25, color });
+      maxA = Math.max(maxA, Math.abs(e));
+      raw.push({ ix, iy, e });
     }
+  }
+
+  for (const p of raw) {
+    const norm = 0.5 + 0.5 * Math.tanh(1.35 * p.e / maxA);
+    cells.push({
+      x: p.ix * dx,
+      y: p.iy * dy,
+      w: dx + 0.3,
+      h: dy + 0.3,
+      color: colorMapTurboLike(norm),
+    });
   }
 
   const barrierSegments = [];
@@ -219,43 +248,43 @@ function AmplitudeMapSVG({ params, tick }) {
   }
   barrierSegments.push({ y1: last, y2: height });
 
+  const contourRings = [];
+  if (showContours) {
+    const wavelengthPx = params.wavelength * pxPerUnit;
+    const phaseShift = (tick * params.animationSpeed * 2.5) % wavelengthPx;
+    for (const y of slitYs) {
+      for (let r = phaseShift; r < 1100; r += wavelengthPx) {
+        if (r > 10) contourRings.push({ x: slitX, y, r });
+      }
+    }
+  }
+
   return (
-    <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Total complex amplitude map">
+    <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Colored total scalar field">
       <rect width={width} height={height} fill="#020617" />
 
-      <defs>
-        <filter id="ampGlow">
-          <feGaussianBlur stdDeviation="1.1" result="blur" />
-          <feMerge>
-            <feMergeNode in="blur" />
-            <feMergeNode in="SourceGraphic" />
-          </feMerge>
-        </filter>
-      </defs>
+      {cells.map((c, idx) => (
+        <rect key={idx} x={c.x} y={c.y} width={c.w} height={c.h} fill={c.color} />
+      ))}
 
-      {/* incident plane wave amplitude stripes */}
-      {Array.from({ length: 12 }).map((_, idx) => {
-        const lambdaPx = params.wavelength * pxPerUnit;
-        const x = slitX - 20 - ((idx * lambdaPx + tick * 2.8 * params.animationSpeed) % 370);
-        return (
-          <rect
-            key={`inc-${idx}`}
-            x={x}
-            y="0"
-            width="7"
-            height={height}
-            fill={idx % 2 ? "#22d3ee" : "#f43f5e"}
-            opacity="0.78"
-          />
-        );
-      })}
+      {showContours && (
+        <g>
+          {contourRings.map((ring, idx) => (
+            <circle
+              key={`ring-${idx}`}
+              cx={ring.x}
+              cy={ring.y}
+              r={ring.r}
+              fill="none"
+              stroke="#00111f"
+              strokeWidth="1.1"
+              opacity={clamp(0.34 - ring.r / 2200, 0.03, 0.26)}
+            />
+          ))}
+        </g>
+      )}
 
-      <g filter="url(#ampGlow)">
-        {cells.map((c, idx) => (
-          <rect key={idx} x={c.x} y={c.y} width={c.w} height={c.h} fill={c.color} />
-        ))}
-      </g>
-
+      {/* Aperture screen */}
       {barrierSegments.map((seg, idx) => (
         <rect
           key={`barrier-${idx}`}
@@ -263,161 +292,25 @@ function AmplitudeMapSVG({ params, tick }) {
           y={seg.y1}
           width={16}
           height={Math.max(0, seg.y2 - seg.y1)}
-          fill="#e2e8f0"
+          fill="#e5e7eb"
           opacity="0.96"
         />
       ))}
 
       {slitYs.map((y, idx) => (
         <g key={`source-${idx}`}>
-          <circle cx={slitX} cy={y} r="5" fill="#fbbf24" />
-          <text x={slitX + 14} y={y + 5} fill="#fde68a" fontWeight="800" fontSize="13">S{idx + 1}</text>
+          <circle cx={slitX} cy={y} r="4.8" fill="#111827" />
+          <circle cx={slitX} cy={y} r="2.5" fill="#fbbf24" />
+          <text x={slitX + 14} y={y + 5} fill="#111827" fontWeight="900" fontSize="13">S{idx + 1}</text>
         </g>
       ))}
 
-      <text x="28" y="36" fill="#e0f2fe" fontWeight="850" fontSize="18">incident plane wave</text>
-      <text x={slitX + 40} y="36" fill="#e0f2fe" fontWeight="850" fontSize="18">total complex amplitude map: Re&#123;E&#125;</text>
-      <text x="28" y={height - 18} fill="#cbd5e1" fontSize="14">
-        Cyan/red are opposite phase signs. Brightness indicates stronger total complex amplitude.
+      <text x="28" y="36" fill="#111827" fontWeight="950" fontSize="18">incident plane wave</text>
+      <text x={slitX + 35} y="36" fill="#111827" fontWeight="950" fontSize="18">
+        total scalar field Re&#123;E(x,y,t)&#125;
       </text>
-    </svg>
-  );
-}
-
-function WavefrontSVG({ params, tick }) {
-  const width = 1000;
-  const height = 580;
-  const slitX = 120;
-  const screenX = 890; // screen drawn far from aperture in the illustration
-  const centerY = height / 2;
-  const pxPerUnit = 70;
-  const slitYs = slitPositions(params.numSlits, params.spacing).map((s) => centerY + s * pxPerUnit);
-  const wavelengthPx = params.wavelength * pxPerUnit;
-  const phaseShift = (tick * params.animationSpeed * 2.5) % wavelengthPx;
-  const rings = [];
-
-  for (const y of slitYs) {
-    for (let r = phaseShift; r < 1100; r += wavelengthPx) {
-      if (r > 8) rings.push({ x: slitX, y, r });
-    }
-  }
-
-  const barrierSegments = [];
-  let last = 0;
-  const slitHalfHeight = 12;
-  const sortedYs = [...slitYs].sort((a, b) => a - b);
-  for (const y of sortedYs) {
-    barrierSegments.push({ y1: last, y2: Math.max(last, y - slitHalfHeight) });
-    last = Math.min(height, y + slitHalfHeight);
-  }
-  barrierSegments.push({ y1: last, y2: height });
-
-  const pattern = computeFarFieldPattern(params);
-  const bars = pattern.filter((_, i) => i % 7 === 0);
-  const angleMaxRad = (params.angleMaxDeg * Math.PI) / 180;
-
-  function thetaToY(thetaDeg) {
-    const theta = (thetaDeg * Math.PI) / 180;
-    return centerY + (theta / angleMaxRad) * (height * 0.43);
-  }
-
-  const D = apertureSize(params.numSlits, params.spacing);
-  const Lff = fraunhoferDistance(params.numSlits, params.spacing, params.wavelength);
-
-  return (
-    <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Moving wavefront diagram">
-      <defs>
-        <linearGradient id="screenGlow2" x1="0" x2="1">
-          <stop offset="0%" stopColor="#38bdf8" stopOpacity="0.15" />
-          <stop offset="100%" stopColor="#f59e0b" stopOpacity="0.95" />
-        </linearGradient>
-        <filter id="softGlow2">
-          <feGaussianBlur stdDeviation="3.2" result="blur" />
-          <feMerge>
-            <feMergeNode in="blur" />
-            <feMergeNode in="SourceGraphic" />
-          </feMerge>
-        </filter>
-      </defs>
-
-      <rect width={width} height={height} fill="#020617" />
-
-      {Array.from({ length: 11 }).map((_, idx) => {
-        const x = slitX - 30 - ((idx * wavelengthPx + phaseShift) % 390);
-        return (
-          <line
-            key={`plane-${idx}`}
-            x1={x}
-            y1={0}
-            x2={x}
-            y2={height}
-            stroke={idx % 2 ? "#38bdf8" : "#7dd3fc"}
-            strokeWidth="2"
-            opacity="0.42"
-          />
-        );
-      })}
-
-      <text x="28" y="35" fill="#bae6fd" fontWeight="800" fontSize="18">incident plane wave</text>
-
-      {barrierSegments.map((seg, idx) => (
-        <rect
-          key={`barrier-${idx}`}
-          x={slitX - 8}
-          y={seg.y1}
-          width={16}
-          height={Math.max(0, seg.y2 - seg.y1)}
-          fill="#e2e8f0"
-          opacity="0.94"
-        />
-      ))}
-      <text x={slitX - 38} y={height - 18} fill="#e2e8f0" fontWeight="800" fontSize="15">slits</text>
-
-      <g filter="url(#softGlow2)">
-        {rings.map((ring, idx) => (
-          <circle
-            key={`ring-${idx}`}
-            cx={ring.x}
-            cy={ring.y}
-            r={ring.r}
-            fill="none"
-            stroke={idx % 2 === 0 ? "#8b5cf6" : "#22d3ee"}
-            strokeWidth="2.0"
-            opacity={clamp(0.56 - ring.r / 1180, 0.055, 0.56)}
-          />
-        ))}
-      </g>
-
-      {slitYs.map((y, idx) => (
-        <g key={`slit-label-${idx}`}>
-          <circle cx={slitX} cy={y} r="5" fill="#f59e0b" />
-          <text x={slitX + 16} y={y + 5} fill="#fde68a" fontSize="13" fontWeight="800">S{idx + 1}</text>
-        </g>
-      ))}
-
-      <line x1={screenX} y1="0" x2={screenX} y2={height} stroke="#f8fafc" strokeWidth="3" strokeDasharray="8 8" />
-      <text x={screenX - 205} y="34" fill="#fff7ed" fontWeight="800" fontSize="17">far-field observation plane</text>
-
-      {bars.map((p, idx) => {
-        const y = thetaToY(p.theta);
-        const barW = 6 + p.intensity * 96;
-        return (
-          <rect
-            key={`screen-bar-${idx}`}
-            x={screenX + 7}
-            y={y - 2}
-            width={barW}
-            height={4}
-            rx={2}
-            fill="url(#screenGlow2)"
-            opacity={0.25 + 0.75 * p.intensity}
-          />
-        );
-      })}
-
-      <path d={`M${slitX},${centerY} L${screenX},${centerY}`} stroke="#94a3b8" strokeWidth="1.8" strokeDasharray="6 8" />
-      <text x={300} y={height - 28} fill="#cbd5e1" fontSize="14" fontWeight="800">
-        aperture D = {round(D, 2)}, far-field condition L ≫ D; Fraunhofer scale ≈ 2D²/λ = {round(Lff, 1)}
+      <text x="28" y={height - 18} fill="#111827" fontSize="14" fontWeight="850">
+        Color shows instantaneous signed field. The visible bright/dark directions come from interference.
       </text>
     </svg>
   );
@@ -426,14 +319,14 @@ function WavefrontSVG({ params, tick }) {
 export default function App() {
   const [params, setParams] = useState({
     numSlits: 2,
-    spacing: 1.4,
+    spacing: 1.55,
     wavelength: 0.72,
     angleMaxDeg: 35,
     animationSpeed: 1.0,
   });
 
   const [tick, setTick] = useState(0);
-  const [viewMode, setViewMode] = useState("amplitude");
+  const [showContours, setShowContours] = useState(false);
 
   React.useEffect(() => {
     let raf = 0;
@@ -452,12 +345,12 @@ export default function App() {
   function reset() {
     setParams({
       numSlits: 2,
-      spacing: 1.4,
+      spacing: 1.55,
       wavelength: 0.72,
       angleMaxDeg: 35,
       animationSpeed: 1.0,
     });
-    setViewMode("amplitude");
+    setShowContours(false);
   }
 
   function singleSlitLike() {
@@ -465,11 +358,11 @@ export default function App() {
   }
 
   function classicDoubleSlit() {
-    setParams({ numSlits: 2, spacing: 1.4, wavelength: 0.72, angleMaxDeg: 35, animationSpeed: 1.0 });
+    setParams({ numSlits: 2, spacing: 1.55, wavelength: 0.72, angleMaxDeg: 35, animationSpeed: 1.0 });
   }
 
   function gratingDemo() {
-    setParams({ numSlits: 7, spacing: 1.25, wavelength: 0.72, angleMaxDeg: 35, animationSpeed: 1.0 });
+    setParams({ numSlits: 7, spacing: 1.12, wavelength: 0.72, angleMaxDeg: 35, animationSpeed: 1.0 });
   }
 
   const D = apertureSize(params.numSlits, params.spacing);
@@ -489,7 +382,7 @@ export default function App() {
             <h1>Coherent waves form bright and dark interference directions</h1>
             <p>
               A monochromatic plane wave illuminates an aperture with one or more slits.
-              Each slit contributes a complex field. The final measurable intensity is obtained only after the complex amplitudes are summed.
+              The visualization now plots the continuous scalar field, closer to the classical wave-optics picture.
             </p>
           </div>
 
@@ -511,7 +404,7 @@ export default function App() {
             <div>
               <h2 className="section-title">Experiment controls</h2>
               <p className="section-subtitle">
-                The observation plane is fixed in the far-field approximation. The far-field condition is checked against the aperture size.
+                The main image shows the total field. The far-field intensity plot is calculated separately from the angular N-slit array factor.
               </p>
             </div>
 
@@ -561,7 +454,7 @@ export default function App() {
 
             <SliderCard
               label="Animation speed"
-              hint="Only changes the speed of the moving illustration."
+              hint="Only changes the speed of the moving field."
               value={params.animationSpeed}
               min={0.2}
               max={2.5}
@@ -574,7 +467,7 @@ export default function App() {
               <h3>Far-field check</h3>
               <p>
                 Aperture size D = {round(D, 3)}. A common Fraunhofer scale is approximately 2D²/λ = {round(Lff, 3)}.
-                The plotted intensity uses the far-field angular variable θ directly.
+                The intensity plot uses the far-field angle θ directly.
               </p>
             </div>
           </motion.aside>
@@ -588,44 +481,31 @@ export default function App() {
             >
               <div className="panel-head">
                 <div>
-                  <h2>{viewMode === "amplitude" ? "Figure 1 — total complex amplitude" : "Figure 1 — moving wavefronts"}</h2>
+                  <h2>Figure 1 — continuous scalar field</h2>
                   <p>
-                    {viewMode === "amplitude"
-                      ? "This mode shows the field amplitude pattern after the slits. It is closer to the wave-optics interference image: the complex field is summed before intensity is calculated."
-                      : "This mode shows Huygens-style secondary wavefronts from each slit and the fixed far-field observation plane."}
+                    This is the corrected view: incident plane waves on the left, and the total field after the slits on the right.
+                    This is closer to the reference image than drawing independent circular wavefronts.
                   </p>
                 </div>
 
                 <div className="mode-toggle">
-                  <button className={viewMode === "amplitude" ? "btn" : "btn secondary"} onClick={() => setViewMode("amplitude")}>
-                    Amplitude map
+                  <button className={showContours ? "btn secondary" : "btn"} onClick={() => setShowContours(false)}>
+                    Color field
                   </button>
-                  <button className={viewMode === "wavefronts" ? "btn" : "btn secondary"} onClick={() => setViewMode("wavefronts")}>
-                    Wavefront lines
+                  <button className={showContours ? "btn" : "btn secondary"} onClick={() => setShowContours(true)}>
+                    Color + contours
                   </button>
                 </div>
               </div>
 
               <div className="canvas-wrap">
-                {viewMode === "amplitude"
-                  ? <AmplitudeMapSVG params={params} tick={tick} />
-                  : <WavefrontSVG params={params} tick={tick} />}
+                <ColorScalarFieldSVG params={params} tick={tick} showContours={showContours} />
               </div>
 
               <div className="legend">
-                {viewMode === "amplitude" ? (
-                  <>
-                    <span className="legend-item"><span className="dot blue-dot" /> positive real field</span>
-                    <span className="legend-item"><span className="dot red-dot" /> negative real field</span>
-                    <span className="legend-item"><span className="dot amber-dot" /> slit sources</span>
-                  </>
-                ) : (
-                  <>
-                    <span className="legend-item"><span className="dot blue-dot" /> incident plane wave</span>
-                    <span className="legend-item"><span className="dot violet-dot" /> secondary wavefronts</span>
-                    <span className="legend-item"><span className="dot amber-dot" /> bright far-field regions</span>
-                  </>
-                )}
+                <span className="legend-item"><span className="dot green-dot" /> instantaneous scalar field</span>
+                <span className="legend-item"><span className="dot amber-dot" /> slit openings</span>
+                <span className="legend-item"><span className="dot violet-dot" /> optional phase contours</span>
               </div>
             </motion.div>
 
@@ -635,7 +515,7 @@ export default function App() {
                   <div>
                     <h2>Far-field intensity pattern</h2>
                     <p>
-                      The horizontal axis is angle θ. The plot uses the N-slit array factor and is independent of a near-field screen distance.
+                      This plot is not taken from a movable near screen. It is the far-field angular pattern I(θ).
                     </p>
                   </div>
                   <span className="pill">I(θ)</span>
@@ -650,28 +530,28 @@ export default function App() {
                 <h3>Classical wave-optics formulation</h3>
 
                 <p>
-                  Each slit contributes a complex phasor. The phasors are summed first.
+                  The field after the slits is the superposition of coherent wavelets.
                 </p>
+
+                <div className="eq">
+                  E(x,y,t) = Σ<sub>m=1</sub><sup>N</sup> A<sub>m</sub> cos(k r<sub>m</sub> − ωt)
+                </div>
+
+                <p>In the far field, each slit contributes a phase proportional to y<sub>m</sub> sin(θ).</p>
 
                 <div className="eq">
                   E(θ) = Σ<sub>m=1</sub><sup>N</sup> A<sub>m</sub> exp[j k y<sub>m</sub> sin(θ)]
                 </div>
 
-                <p>The measured brightness is proportional to the squared magnitude of the total complex amplitude.</p>
-
                 <div className="eq">
                   I(θ) = |E(θ)|², &nbsp;&nbsp; k = 2π / λ
                 </div>
 
-                <p>
-                  For maxima, neighbouring slits must differ in path length by an integer number of wavelengths:
-                </p>
+                <p>Constructive interference occurs when the neighbouring-slit path difference is an integer number of wavelengths:</p>
 
                 <div className="eq">
-                  d sin(θ) = n λ, &nbsp;&nbsp; n = 0, ±1, ±2, ...
+                  d sin(θ) = n λ
                 </div>
-
-                <p>Equivalently:</p>
 
                 <div className="eq">
                   sin(θ<sub>n</sub>) = n λ / d
@@ -687,7 +567,7 @@ export default function App() {
                   A single-frequency wave illuminates all slits with a fixed phase relationship.
                 </div>
                 <div className="teacher-step">
-                  <strong>2. Slits act as sources</strong>
+                  <strong>2. Slits act as wavelet sources</strong>
                   Each slit radiates a wavelet with the same frequency as the incident wave.
                 </div>
                 <div className="teacher-step">
@@ -702,20 +582,20 @@ export default function App() {
             </div>
 
             <div className="explain">
-              <Concept icon={<Waves size={18} />} title="Why one shared frequency?">
-                The incident wave is monochromatic, so every slit radiates at the same frequency. The interference pattern is controlled by phase differences caused by path length differences.
+              <Concept icon={<Waves size={18} />} title="Why the old wavefront view looked wrong">
+                Drawing independent circular rings from every slit does not show the actual summed field. The corrected view calculates the field value at every point by adding the contributions from all slits.
               </Concept>
 
               <Concept icon={<MoveHorizontal size={18} />} title="What does changing slit distance do?">
                 Increasing d changes the angular spacing of the maxima. The condition d sin θ = nλ shows that larger spacing moves maxima closer together in angle.
               </Concept>
 
-              <Concept icon={<Eye size={18} />} title="Why force the far-field observation?">
-                The standard double-slit equation is a far-field angular result. Using θ directly avoids confusing it with near-field propagation from a finite screen distance.
+              <Concept icon={<Eye size={18} />} title="Why use far-field intensity?">
+                The standard double-slit equation is a far-field angular result. Near the slits, the field is a propagation picture; far away, it becomes a stable angular interference pattern.
               </Concept>
 
               <Concept icon={<Sparkles size={18} />} title="Amplitude before intensity">
-                The complex amplitudes add first. Only after summing the field do we calculate intensity using I = |E|².
+                The scalar or complex amplitudes add first. Only after summing the field do we calculate intensity using I = |E|².
               </Concept>
             </div>
           </section>
