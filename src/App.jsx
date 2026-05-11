@@ -212,7 +212,7 @@ function FarFieldIntensityPlot({ params }) {
 */
 
 
-function ColorScalarFieldCanvas({ params, tick, showContours, edgeMode }) {
+function ColorScalarFieldCanvas({ params, tick, showContours }) {
   const canvasRef = useRef(null);
 
   useEffect(() => {
@@ -394,7 +394,8 @@ function ColorScalarFieldCanvas({ params, tick, showContours, edgeMode }) {
       ctx.restore();
     }
 
-    // Right-edge switchable trace: signed Re{E} or complex magnitude |E|.
+
+    // Right-edge overlaid traces: signed Re{E} and complex magnitude |E|.
     ctx.save();
     ctx.fillStyle = "rgba(2, 6, 23, 0.78)";
     ctx.fillRect(screenX, 0, width - screenX, height);
@@ -410,23 +411,24 @@ function ColorScalarFieldCanvas({ params, tick, showContours, edgeMode }) {
 
     ctx.fillStyle = "#ffffff";
     ctx.font = "900 15px Inter, system-ui, sans-serif";
-    ctx.fillText(edgeMode === "magnitude" ? "right-edge |E|" : "right-edge Re{E}", screenX + 12, 30);
+    ctx.fillText("right-edge Re{E} and |E|", screenX + 12, 30);
     ctx.fillStyle = "#cbd5e1";
     ctx.font = "12px Inter, system-ui, sans-serif";
-    ctx.fillText(edgeMode === "magnitude" ? "complex magnitude field" : "signed real field", screenX + 12, 51);
+    ctx.fillText("cyan/pink: Re{E}, gold: |E|", screenX + 12, 51);
 
     const sampleCount = 220;
     const screenSampleX = screenX - 18;
     const samples = [];
-    let maxTrace = 1e-9;
+    let maxRe = 1e-9;
+    let maxMagTrace = 1e-9;
 
     for (let i = 0; i < sampleCount; i++) {
       const y = 22 + (i / (sampleCount - 1)) * (height - 44);
       const [re, im] = fieldComplexAtPixel(screenSampleX, y);
       const mag = Math.sqrt(re * re + im * im);
-      const val = edgeMode === "magnitude" ? mag : re;
-      maxTrace = Math.max(maxTrace, Math.abs(val));
-      samples.push({ y, val });
+      maxRe = Math.max(maxRe, Math.abs(re));
+      maxMagTrace = Math.max(maxMagTrace, mag);
+      samples.push({ y, re, mag });
     }
 
     const x0 = screenX + 58;
@@ -437,15 +439,13 @@ function ColorScalarFieldCanvas({ params, tick, showContours, edgeMode }) {
     ctx.lineTo(x0, height - 22);
     ctx.stroke();
 
-    // bars
-    ctx.lineWidth = 2.0;
+    // Re{E} signed bars
+    ctx.lineWidth = 1.9;
     for (const s of samples) {
-      const normalized = s.val / maxTrace;
-      const bar = normalized * 46;
-      ctx.strokeStyle = edgeMode === "magnitude"
-        ? "#fbbf24"
-        : normalized >= 0 ? "#22d3ee" : "#fb7185";
-      ctx.globalAlpha = 0.88;
+      const normalized = s.re / maxRe;
+      const bar = normalized * 34;
+      ctx.strokeStyle = normalized >= 0 ? "#22d3ee" : "#fb7185";
+      ctx.globalAlpha = 0.82;
       ctx.beginPath();
       ctx.moveTo(x0, s.y);
       ctx.lineTo(x0 + bar, s.y);
@@ -453,21 +453,40 @@ function ColorScalarFieldCanvas({ params, tick, showContours, edgeMode }) {
     }
     ctx.globalAlpha = 1;
 
-    // smooth trace curve overlay
-    ctx.lineWidth = 2.5;
-    ctx.strokeStyle = edgeMode === "magnitude" ? "#fde68a" : "#ffffff";
+    // Smooth Re{E} curve
+    ctx.lineWidth = 2.2;
+    ctx.strokeStyle = "#ffffff";
     ctx.beginPath();
     samples.forEach((s, i) => {
-      const normalized = s.val / maxTrace;
-      const x = x0 + normalized * 46;
-      if (i === 0) ctx.moveTo(x, s.y);
+      const x = x0 + (s.re / maxRe) * 34;
+      if (i == 0) ctx.moveTo(x, s.y);
       else ctx.lineTo(x, s.y);
     });
     ctx.stroke();
 
+    // Overlay |E| curve (always positive)
+    ctx.lineWidth = 2.8;
+    ctx.strokeStyle = "#fbbf24";
+    ctx.beginPath();
+    samples.forEach((s, i) => {
+      const x = x0 + (s.mag / maxMagTrace) * 46;
+      if (i == 0) ctx.moveTo(x, s.y);
+      else ctx.lineTo(x, s.y);
+    });
+    ctx.stroke();
+
+    ctx.fillStyle = "#22d3ee";
+    ctx.fillRect(screenX + 12, 66, 14, 3);
+    ctx.fillStyle = "#fb7185";
+    ctx.fillRect(screenX + 28, 66, 14, 3);
+    ctx.fillStyle = "#fbbf24";
+    ctx.fillRect(screenX + 48, 66, 16, 3);
+
     ctx.fillStyle = "#e2e8f0";
     ctx.font = "12px Inter, system-ui, sans-serif";
-    ctx.fillText(edgeMode === "magnitude" ? "|E| ≥ 0 amplitude envelope" : "signed amplitude, not intensity", screenX + 12, height - 20);
+    ctx.fillText("Re{E}", screenX + 12, height - 34);
+    ctx.fillText("|E|", screenX + 78, height - 34);
+    ctx.fillText("amplitude traces, not intensity", screenX + 12, height - 18);
     ctx.restore();
 
     // Labels last, for readability.
@@ -478,9 +497,9 @@ function ColorScalarFieldCanvas({ params, tick, showContours, edgeMode }) {
     ctx.fillText("total scalar field Re{E(x,y,t)}", slitX + 35, 36);
 
     ctx.font = "850 14px Inter, system-ui, sans-serif";
-    ctx.fillText(`Manual view zoom = ${round(params.viewZoom, 2)}×. Resolution: ${cols}×${rows} field samples.`, 28, height - 18);
+    ctx.fillText(`Manual view zoom = ${round(params.viewZoom, 2)}×. Resolution: ${cols}×${rows} field samples. Right trace overlays Re{E} and |E|.`, 28, height - 18);
     ctx.restore();
-  }, [params, tick, showContours, edgeMode]);
+  }, [params, tick, showContours]);
 
   return (
     <canvas
@@ -505,7 +524,6 @@ export default function App() {
 
   const [tick, setTick] = useState(0);
   const [showContours, setShowContours] = useState(false);
-  const [edgeMode, setEdgeMode] = useState("real");
 
   React.useEffect(() => {
     let raf = 0;
@@ -531,7 +549,6 @@ export default function App() {
       viewZoom: 1.0,
     });
     setShowContours(false);
-    setEdgeMode("real");
   }
 
   function singleSlitLike() {
@@ -585,7 +602,7 @@ export default function App() {
             <div>
               <h2 className="section-title">Experiment controls</h2>
               <p className="section-subtitle">
-                The main image uses a high-resolution canvas renderer. Zoom out to see more of a large aperture, or zoom in to inspect the near-slit field.
+                The main image uses a high-resolution canvas renderer. Zoom out much more to see a large aperture, or zoom in much more to inspect the near-slit field.
               </p>
             </div>
 
@@ -646,10 +663,10 @@ export default function App() {
 
             <SliderCard
               label="View zoom"
-              hint="Manually zoom in or out of the aperture and field view."
+              hint="Manually zoom much farther in or out of the aperture and field view."
               value={params.viewZoom}
-              min={0.45}
-              max={2.2}
+              min={0.15}
+              max={5.0}
               step={0.05}
               unit="×"
               onChange={(v) => update("viewZoom", v)}
@@ -675,7 +692,7 @@ export default function App() {
                 <div>
                   <h2>Figure 1 — continuous scalar field</h2>
                   <p>
-                    This is the corrected high-resolution view: incident plane waves on the left, and the total field after the slits on the right. Use the View zoom slider to zoom in/out manually.
+                    This is the corrected high-resolution view: incident plane waves on the left, and the total field after the slits on the right. Use the larger-range View zoom slider to zoom much farther in or out.
                     This is closer to the reference image than drawing independent circular wavefronts.
                   </p>
                 </div>
@@ -687,24 +704,18 @@ export default function App() {
                   <button className={showContours ? "btn" : "btn secondary"} onClick={() => setShowContours(true)}>
                     Color + contours
                   </button>
-                  <button className={edgeMode === "real" ? "btn" : "btn secondary"} onClick={() => setEdgeMode("real")}>
-                    Right: Re&#123;E&#125;
-                  </button>
-                  <button className={edgeMode === "magnitude" ? "btn" : "btn secondary"} onClick={() => setEdgeMode("magnitude")}>
-                    Right: |E|
-                  </button>
                 </div>
               </div>
 
               <div className="canvas-wrap">
-                <ColorScalarFieldCanvas params={params} tick={tick} showContours={showContours} edgeMode={edgeMode} />
+                <ColorScalarFieldCanvas params={params} tick={tick} showContours={showContours} />
               </div>
 
               <div className="legend">
                 <span className="legend-item"><span className="dot green-dot" /> instantaneous scalar field</span>
                 <span className="legend-item"><span className="dot amber-dot" /> slit openings</span>
                 <span className="legend-item">view zoom: {round(params.viewZoom, 2)}×</span>
-                <span className="legend-item">right trace: {edgeMode === "magnitude" ? "|E|" : "Re{E}"}</span>
+                <span className="legend-item">right traces: Re&#123;E&#125; + |E| overlay</span>
                 <span className="legend-item"><span className="dot violet-dot" /> optional phase contours</span>
               </div>
             </motion.div>

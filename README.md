@@ -1,6 +1,13 @@
-# Double Slit Experiment App v7
+# Double Slit Experiment App v8
 
 Interactive Vite + React app for the double-slit and multi-slit wave interference experiment.
+
+## Changes in v8
+
+- Right-edge panel now overlays both Re{E} and |E| at the same time.
+- Removed the old switchable edge-mode buttons.
+- Extended manual zoom range from 0.15× to 5.0×.
+- Added clearer right-edge labels and mini legend.
 
 ## Changes in v7
 
